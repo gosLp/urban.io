@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>urban.io — Govern What You Inherited</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <canvas id="game-canvas"></canvas>
+
+  <!-- Top bar: city name + turn -->
+  <div id="top-bar">
+    <div id="city-label">
+      <span id="city-name">Bengaluru</span>
+      <span id="turn-display">Turn 0</span>
+    </div>
+    <div id="mode-badge">Political Mode</div>
+  </div>
+
+  <!-- Metrics HUD (left side) -->
+  <div id="hud-left">
+    <h3>City Overview</h3>
+    <div class="metric-row">
+      <span class="metric-label">Population</span>
+      <span class="metric-value" id="m-population">—</span>
+    </div>
+    <div class="metric-row">
+      <span class="metric-label">Avg Commute</span>
+      <span class="metric-value" id="m-commute">—</span>
+    </div>
+    <div class="metric-row">
+      <span class="metric-label">Avg Rent</span>
+      <span class="metric-value" id="m-rent">—</span>
+    </div>
+    <div class="metric-row">
+      <span class="metric-label">Happiness</span>
+      <span class="metric-value" id="m-happiness">—</span>
+    </div>
+    <div class="metric-row">
+      <span class="metric-label">Congestion</span>
+      <span class="metric-value" id="m-congestion">—</span>
+    </div>
+    <div class="metric-row">
+      <span class="metric-label">Transit Riders</span>
+      <span class="metric-value" id="m-transit">—</span>
+    </div>
+    <div class="metric-row">
+      <span class="metric-label">Budget</span>
+      <span class="metric-value" id="m-budget">—</span>
+    </div>
+    <div class="metric-row">
+      <span class="metric-label">Housing Gap</span>
+      <span class="metric-value" id="m-housing">—</span>
+    </div>
+    <div id="goals-section">
+      <h3>Goals</h3>
+      <div id="goals-list"></div>
+    </div>
+  </div>
+
+  <!-- District info panel (right side, shown on click) -->
+  <div id="district-panel" class="hidden">
+    <button id="district-close">&times;</button>
+    <h3 id="district-name">—</h3>
+    <div id="district-stats"></div>
+    <div id="district-rep"></div>
+  </div>
+
+  <!-- Bottom controls -->
+  <div id="bottom-bar">
+    <button id="btn-next-turn" class="btn-primary">Next Turn</button>
+    <div id="policy-buttons"></div>
+  </div>
+
+  <!-- Vote result overlay -->
+  <div id="vote-overlay" class="hidden">
+    <div id="vote-content">
+      <h3 id="vote-title">—</h3>
+      <div id="vote-result-badge">—</div>
+      <div id="vote-tally">—</div>
+      <div id="vote-breakdown"></div>
+      <button id="vote-dismiss" class="btn-primary">Continue</button>
+    </div>
+  </div>
+
+  <!-- Event feed -->
+  <div id="event-feed"></div>
+
+  <script type="module" src="main.ts"></script>
+</body>
+</html>
