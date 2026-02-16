@@ -1,0 +1,27 @@
+{
+  "name": "urban-io",
+  "version": "0.1.0",
+  "description": "Political simulation game engine - govern what you inherited",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "demo": "tsx src/demo.ts"
+  },
+  "keywords": [
+    "simulation",
+    "urban",
+    "politics",
+    "game-engine"
+  ],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^25.2.3",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.18"
+  }
+}
