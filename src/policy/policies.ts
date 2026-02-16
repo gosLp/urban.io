@@ -323,3 +323,287 @@ export function createTaxIncreasePolicy(
     ],
   };
 }
+
+// ============================================================
+// EARLY-GAME POLICIES
+// Cheap, low-risk moves that give players viable actions from turn 1.
+// These are the "small wins" that stabilize the situation before
+// the player has political capital for bigger reforms.
+// ============================================================
+
+/**
+ * Dedicate bus lanes on congested corridors.
+ * Free (just paint and signs), immediately reduces bus travel time,
+ * small congestion relief. Easy political sell.
+ */
+export function createBusLanePolicy(
+  districtIds: DistrictId[],
+  corridorName: string
+): PolicyProposal {
+  return {
+    id: nextPolicyId(),
+    name: `Bus Lanes: ${corridorName}`,
+    description: `Dedicate bus lanes on ${corridorName}. Costs almost nothing — just paint and enforcement. Speeds up buses, slight congestion relief for transit users.`,
+    category: PolicyCategory.Transit,
+    voteRequirement: VoteRequirement.SimpleMajority,
+    cost: 30,
+    targetDistricts: districtIds,
+    politicalCost: 0.15,
+    effects: districtIds.map((districtId) => ({
+      target: { type: "district" as const, districtId },
+      metric: "trafficCongestion",
+      delta: -0.03,
+      delay: 1,
+      duration: 0,
+    })),
+  };
+}
+
+/**
+ * Enforce parking rules and meter unmetered lots.
+ * GENERATES revenue, reduces illegal parking blocking traffic.
+ * Populists hate it, everyone else is fine.
+ */
+export function createParkingEnforcementPolicy(
+  districtIds: DistrictId[]
+): PolicyProposal {
+  return {
+    id: nextPolicyId(),
+    name: "Parking Enforcement & Metering",
+    description: `Meter unmetered lots and enforce existing parking rules. Generates revenue, reduces illegal parking that blocks traffic. Quick to implement.`,
+    category: PolicyCategory.Infrastructure,
+    voteRequirement: VoteRequirement.SimpleMajority,
+    cost: -150, // generates revenue
+    targetDistricts: districtIds,
+    politicalCost: 0.25,
+    effects: [
+      ...districtIds.map((districtId) => ({
+        target: { type: "district" as const, districtId },
+        metric: "trafficCongestion",
+        delta: -0.02,
+        delay: 1,
+        duration: 0,
+      })),
+    ],
+  };
+}
+
+/**
+ * Fix key intersections — signal timing, turn lanes, pedestrian signals.
+ * Cheap, targeted, immediate effect. Every council member likes this
+ * when it's in their district.
+ */
+export function createIntersectionFixPolicy(
+  districtId: DistrictId,
+  districtName: string
+): PolicyProposal {
+  return {
+    id: nextPolicyId(),
+    name: `Fix Intersections: ${districtName}`,
+    description: `Upgrade signal timing, add turn lanes, and improve pedestrian crossings in ${districtName}. Cheap and effective.`,
+    category: PolicyCategory.Infrastructure,
+    voteRequirement: VoteRequirement.SimpleMajority,
+    cost: 80,
+    targetDistricts: [districtId],
+    politicalCost: 0.1,
+    effects: [
+      {
+        target: { type: "district", districtId },
+        metric: "trafficCongestion",
+        delta: -0.04,
+        delay: 1,
+        duration: 0,
+      },
+      {
+        target: { type: "district", districtId },
+        metric: "publicServiceSatisfaction",
+        delta: 0.03,
+        delay: 1,
+        duration: 0,
+      },
+    ],
+  };
+}
+
+/**
+ * Improve public services — water, streetlights, waste collection.
+ * Cheap, universally popular, boosts happiness directly.
+ * The "safe vote" for any politician.
+ */
+export function createPublicServicesPolicy(
+  districtId: DistrictId,
+  districtName: string
+): PolicyProposal {
+  return {
+    id: nextPolicyId(),
+    name: `Improve Services: ${districtName}`,
+    description: `Better water supply, streetlights, and waste collection in ${districtName}. Small cost, universally popular.`,
+    category: PolicyCategory.Infrastructure,
+    voteRequirement: VoteRequirement.SimpleMajority,
+    cost: 100,
+    targetDistricts: [districtId],
+    politicalCost: 0.05,
+    effects: [
+      {
+        target: { type: "district", districtId },
+        metric: "publicServiceSatisfaction",
+        delta: 0.06,
+        delay: 1,
+        duration: 0,
+      },
+      {
+        target: { type: "district", districtId },
+        metric: "happiness",
+        delta: 0.02,
+        delay: 1,
+        duration: 0,
+      },
+    ],
+  };
+}
+
+/**
+ * Add bus frequency / extend hours on existing routes.
+ * Cheap upgrade to existing infrastructure. Increases ridership,
+ * slight congestion relief. Easy political sell.
+ */
+export function createBusFrequencyPolicy(
+  districtIds: DistrictId[],
+  routeName: string
+): PolicyProposal {
+  return {
+    id: nextPolicyId(),
+    name: `More Buses: ${routeName}`,
+    description: `Increase frequency and extend hours on ${routeName}. Uses existing infrastructure, just more buses on the road.`,
+    category: PolicyCategory.Transit,
+    voteRequirement: VoteRequirement.SimpleMajority,
+    cost: 120,
+    targetDistricts: districtIds,
+    politicalCost: 0.1,
+    effects: districtIds.map((districtId) => ({
+      target: { type: "district" as const, districtId },
+      metric: "trafficCongestion",
+      delta: -0.03,
+      delay: 0,
+      duration: 0,
+    })),
+  };
+}
+
+/**
+ * Plant trees and create pocket parks.
+ * Cheap, universally popular, boosts green space and happiness.
+ * No political opposition.
+ */
+export function createGreenSpacePolicy(
+  districtId: DistrictId,
+  districtName: string
+): PolicyProposal {
+  return {
+    id: nextPolicyId(),
+    name: `Green Spaces: ${districtName}`,
+    description: `Plant trees, create pocket parks, and beautify public spaces in ${districtName}. Popular with everyone.`,
+    category: PolicyCategory.Infrastructure,
+    voteRequirement: VoteRequirement.SimpleMajority,
+    cost: 60,
+    targetDistricts: [districtId],
+    politicalCost: 0.05,
+    effects: [
+      {
+        target: { type: "district", districtId },
+        metric: "greenSpaceAccess",
+        delta: 0.05,
+        delay: 2,
+        duration: 0,
+      },
+      {
+        target: { type: "district", districtId },
+        metric: "happiness",
+        delta: 0.02,
+        delay: 2,
+        duration: 0,
+      },
+      {
+        target: { type: "district", districtId },
+        metric: "propertyValue",
+        delta: 0.03,
+        delay: 3,
+        duration: 0,
+      },
+    ],
+  };
+}
+
+/**
+ * Pilot congestion pricing — limited area, temporary, lower rates.
+ * Tests the idea without full political commitment.
+ * Generates some revenue, less political backlash than full pricing.
+ */
+export function createPilotCongestionPricingPolicy(
+  districtId: DistrictId,
+  districtName: string
+): PolicyProposal {
+  return {
+    id: nextPolicyId(),
+    name: `Pilot Congestion Pricing: ${districtName}`,
+    description: `6-month trial of congestion pricing in ${districtName} only. Lower rates, limited scope. Tests the concept with less political risk.`,
+    category: PolicyCategory.CongestionPricing,
+    voteRequirement: VoteRequirement.SimpleMajority,
+    cost: -100, // generates revenue (less than full pricing)
+    targetDistricts: [districtId],
+    politicalCost: 0.4,
+    effects: [
+      {
+        target: { type: "district", districtId },
+        metric: "trafficCongestion",
+        delta: -0.06,
+        delay: 1,
+        duration: 6, // temporary pilot
+      },
+    ],
+  };
+}
+
+/**
+ * Footpath and cycling infrastructure.
+ * Low cost, reduces short-trip car usage, mild congestion relief.
+ * Progressive/YIMBY love it, no real opposition.
+ */
+export function createWalkabilityPolicy(
+  districtId: DistrictId,
+  districtName: string
+): PolicyProposal {
+  return {
+    id: nextPolicyId(),
+    name: `Walkability: ${districtName}`,
+    description: `Build proper footpaths and cycling lanes in ${districtName}. Reduces short car trips, improves livability.`,
+    category: PolicyCategory.Infrastructure,
+    voteRequirement: VoteRequirement.SimpleMajority,
+    cost: 90,
+    targetDistricts: [districtId],
+    politicalCost: 0.1,
+    effects: [
+      {
+        target: { type: "district", districtId },
+        metric: "trafficCongestion",
+        delta: -0.02,
+        delay: 2,
+        duration: 0,
+      },
+      {
+        target: { type: "district", districtId },
+        metric: "happiness",
+        delta: 0.03,
+        delay: 2,
+        duration: 0,
+      },
+      {
+        target: { type: "district", districtId },
+        metric: "publicServiceSatisfaction",
+        delta: 0.03,
+        delay: 2,
+        duration: 0,
+      },
+    ],
+  };
+}

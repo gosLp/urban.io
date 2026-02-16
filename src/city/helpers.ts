@@ -134,7 +134,8 @@ export function createTransitLine(
     districts,
     capacity,
     ridership: operational ? capacity * 0.4 : 0,
-    operatingCost: type === TransitType.Rail ? capacity * 0.5 : capacity * 0.15,
+    // Per-turn operating cost (not per-hour) — matches transit.ts formula
+    operatingCost: type === TransitType.Rail ? capacity * 0.02 : capacity * 0.008,
     constructionTurnsRemaining: operational ? 0 : type === TransitType.Rail ? 6 : 2,
     propertyValueBoost: type === TransitType.Rail ? 1.0 : 0.3,
   };

@@ -1,6 +1,8 @@
 // ============================================================
 // Economic & Population Model
 // Budget, migration, happiness, population dynamics
+// Key fix: budget math uses config income, happiness is damped,
+//          migration is gentle, tax formula matches expectations
 // ============================================================
 
 import {
@@ -12,15 +14,10 @@ import {
   ActiveEffect,
 } from "../types.js";
 
-/** Migration sensitivity: how responsive people are to conditions */
-const MIGRATION_RATE = 0.02;
-/** Natural population growth rate per turn */
-const NATURAL_GROWTH_RATE = 0.002;
-/** Income growth with economic output */
-const INCOME_GROWTH_RATE = 0.01;
-/** Base city income per person */
-const TAX_PER_CAPITA = 0.05;
-/** Happiness weights */
+const MIGRATION_RATE = 0.008; // gentler migration
+const NATURAL_GROWTH_RATE = 0.001;
+const HAPPINESS_DAMPING = 0.12; // happiness changes gradually
+
 const HAPPINESS_WEIGHTS = {
   commute: 0.25,
   rent: 0.25,
@@ -31,12 +28,10 @@ const HAPPINESS_WEIGHTS = {
 };
 
 /**
- * Calculate composite happiness for a district (0-1).
+ * Calculate TARGET happiness for a district (0-1).
  */
 export function calculateHappiness(district: District): number {
   const m = district.metrics;
-
-  // Each component: higher is better
   const commuteScore = Math.max(0, 1 - m.averageCommuteMinutes / 60);
   const rentScore = Math.max(0, 1 - m.rentBurden);
   const jobScore = m.jobAccessScore;
@@ -56,7 +51,6 @@ export function calculateHappiness(district: District): number {
 
 /**
  * Calculate job access score for a district.
- * Based on: jobs in district + reachable jobs in adjacent districts.
  */
 export function calculateJobAccess(
   district: District,
@@ -66,20 +60,14 @@ export function calculateJobAccess(
   if (totalJobs === 0) return 0;
 
   const districtMap = new Map(allDistricts.map((d) => [d.id, d]));
-
-  // Jobs in own district (mixed-use, commercial, industrial zones)
   const localJobs = estimateDistrictJobs(district);
 
-  // Jobs in adjacent districts (discounted by commute difficulty)
   let reachableJobs = localJobs;
   for (const adjId of district.adjacentDistricts) {
     const adj = districtMap.get(adjId);
     if (adj) {
       const adjJobs = estimateDistrictJobs(adj);
-      // Transit makes adjacent jobs more accessible
-      const accessFactor = district.hasTransitStation && adj.hasTransitStation
-        ? 0.8
-        : 0.5;
+      const accessFactor = district.hasTransitStation && adj.hasTransitStation ? 0.8 : 0.5;
       reachableJobs += adjJobs * accessFactor;
     }
   }
@@ -95,14 +83,13 @@ function estimateDistrictJobs(d: District): number {
 
 /**
  * Simulate population migration between districts.
- * People move toward: better jobs, lower rent, better commute.
+ * Much gentler than before to prevent wild swings.
  */
 export function simulateMigration(
   districts: District[]
 ): { from: DistrictId; to: DistrictId; count: number }[] {
   const moves: { from: DistrictId; to: DistrictId; count: number }[] = [];
 
-  // Calculate attractiveness of each district
   const attractiveness = new Map<DistrictId, number>();
   for (const d of districts) {
     const score =
@@ -112,28 +99,25 @@ export function simulateMigration(
     attractiveness.set(d.id, score);
   }
 
-  // People move from less attractive to more attractive adjacent districts
+  const districtMap = new Map(districts.map((d) => [d.id, d]));
+
   for (const d of districts) {
     const myScore = attractiveness.get(d.id) ?? 0.5;
 
     for (const adjId of d.adjacentDistricts) {
-      const adjDistrict = districts.find((dd) => dd.id === adjId);
+      const adjDistrict = districtMap.get(adjId);
       if (!adjDistrict) continue;
 
       const adjScore = attractiveness.get(adjId) ?? 0.5;
       const diff = adjScore - myScore;
 
-      if (diff > 0.05) {
-        // Adjacent is more attractive
-        // Check capacity
+      if (diff > 0.08) {
         const adjCapacity = adjDistrict.maxDensity * adjDistrict.area;
         const adjRoom = adjCapacity - adjDistrict.population;
 
         if (adjRoom > 0) {
-          const migrants = Math.floor(
-            d.population * MIGRATION_RATE * diff
-          );
-          const actualMigrants = Math.min(migrants, Math.floor(adjRoom * 0.1));
+          const migrants = Math.floor(d.population * MIGRATION_RATE * diff);
+          const actualMigrants = Math.min(migrants, Math.floor(adjRoom * 0.02));
 
           if (actualMigrants > 0) {
             moves.push({ from: d.id, to: adjId, count: actualMigrants });
@@ -144,7 +128,6 @@ export function simulateMigration(
   }
 
   // Apply moves
-  const districtMap = new Map(districts.map((d) => [d.id, d]));
   for (const move of moves) {
     const from = districtMap.get(move.from);
     const to = districtMap.get(move.to);
@@ -157,48 +140,54 @@ export function simulateMigration(
   return moves;
 }
 
-/**
- * Apply natural population growth.
- */
 export function applyPopulationGrowth(districts: District[]): void {
   for (const d of districts) {
     const capacity = d.maxDensity * d.area;
     const room = capacity - d.population;
     if (room > 0) {
       const growth = Math.floor(d.population * NATURAL_GROWTH_RATE);
-      d.population += Math.min(growth, Math.floor(room * 0.05));
+      d.population += Math.min(growth, Math.floor(room * 0.02));
     }
   }
 }
 
 /**
  * Update the city budget.
+ * FIXED: uses proper income formula, transit cost passed as parameter.
  */
 export function updateBudget(
   budget: Budget,
   districts: District[],
-  activeEffects: ActiveEffect[]
+  transitCost: number
 ): GameEvent[] {
   const events: GameEvent[] = [];
 
-  // Income = population * tax rate * per capita rate
+  // Income: population-based tax revenue
   const totalPop = districts.reduce((s, d) => s + d.population, 0);
-  budget.incomePerTurn = totalPop * TAX_PER_CAPITA * budget.taxRate;
+  // Tax per capita scales so that Bengaluru (1.45M pop, 15% tax) yields ~2000-2500/turn
+  budget.incomePerTurn = totalPop * 0.0012 * (budget.taxRate / 0.1);
 
-  // Net
+  // Fare revenue from transit (riders * avg fare)
+  const fareRevenue = transitCost * 0.6; // transit covers ~60% of costs via fares
+
+  // Expenses: base operations + transit (net of fares)
+  const baseExpenses = 400; // base city services
+  const netTransitCost = transitCost * (1 - budget.transitSubsidy) - fareRevenue;
+  budget.expensesPerTurn = baseExpenses + Math.max(0, netTransitCost);
+
   const net = budget.incomePerTurn - budget.expensesPerTurn;
   budget.balance += net;
 
-  if (budget.balance < 0) {
+  if (budget.balance < -5000) {
     events.push({
       type: "budget",
-      message: `Budget deficit! Balance: ${budget.balance.toFixed(0)}. Consider raising taxes or cutting services.`,
+      message: `Budget deficit! Balance: $${budget.balance.toFixed(0)}. Consider raising taxes or cutting services.`,
       severity: "critical",
     });
-  } else if (net < 0) {
+  } else if (net < -200) {
     events.push({
       type: "budget",
-      message: `Running a deficit of ${Math.abs(net).toFixed(0)} per turn.`,
+      message: `Running a deficit of $${Math.abs(net).toFixed(0)} per turn.`,
       severity: "warning",
     });
   }
@@ -224,7 +213,6 @@ export function applyActiveEffects(
 
     const effect = ae.effect;
 
-    // Apply to target
     switch (effect.target.type) {
       case "district": {
         const d = districtMap.get(effect.target.districtId);
@@ -265,14 +253,12 @@ export function applyActiveEffects(
       }
     }
 
-    // Decrement duration
     if (ae.turnsRemaining > 0) {
       ae.turnsRemaining--;
     }
   }
 
-  // Remove expired effects
-  const before = activeEffects.length;
+  // Remove expired
   for (let i = activeEffects.length - 1; i >= 0; i--) {
     if (activeEffects[i].turnsRemaining === 0) {
       activeEffects.splice(i, 1);
@@ -281,11 +267,11 @@ export function applyActiveEffects(
 }
 
 function clampMetric(obj: Record<string, number>, key: string): void {
-  const clamped = [
+  const clamped01 = [
     "trafficCongestion", "rentBurden", "happiness",
     "jobAccessScore", "publicServiceSatisfaction", "greenSpaceAccess",
   ];
-  if (clamped.includes(key)) {
+  if (clamped01.includes(key)) {
     obj[key] = Math.max(0, Math.min(1, obj[key]));
   }
 }
@@ -293,31 +279,19 @@ function clampMetric(obj: Record<string, number>, key: string): void {
 /**
  * Update city-wide metrics from district data.
  */
-export function updateCityMetrics(
-  districts: District[],
-  metrics: CityMetrics
-): void {
+export function updateCityMetrics(districts: District[], metrics: CityMetrics): void {
   const totalPop = districts.reduce((s, d) => s + d.population, 0);
   metrics.totalPopulation = totalPop;
-
   if (totalPop === 0) return;
 
-  // Population-weighted averages
   metrics.averageCommute =
-    districts.reduce((s, d) => s + d.metrics.averageCommuteMinutes * d.population, 0) /
-    totalPop;
-
+    districts.reduce((s, d) => s + d.metrics.averageCommuteMinutes * d.population, 0) / totalPop;
   metrics.overallHappiness =
-    districts.reduce((s, d) => s + d.metrics.happiness * d.population, 0) /
-    totalPop;
-
+    districts.reduce((s, d) => s + d.metrics.happiness * d.population, 0) / totalPop;
   metrics.congestionIndex =
-    districts.reduce((s, d) => s + d.metrics.trafficCongestion * d.population, 0) /
-    totalPop;
-
-  metrics.housingDemand = Math.floor(totalPop / 2.5 * 1.1); // 10% over actual pop demand
-
-  metrics.budgetHealth = Math.max(0, Math.min(1, 0.5)); // updated by budget system
+    districts.reduce((s, d) => s + d.metrics.trafficCongestion * d.population, 0) / totalPop;
+  metrics.housingDemand = Math.floor(totalPop / 2.5 * 1.1);
+  metrics.budgetHealth = Math.max(0, Math.min(1, 0.5));
 }
 
 /**
@@ -327,16 +301,19 @@ export function tickEconomy(
   districts: District[],
   metrics: CityMetrics,
   budget: Budget,
-  activeEffects: ActiveEffect[]
+  activeEffects: ActiveEffect[],
+  transitCost: number
 ): { moves: { from: DistrictId; to: DistrictId; count: number }[]; events: GameEvent[] } {
   const events: GameEvent[] = [];
 
   // 1. Apply active policy effects
   applyActiveEffects(activeEffects, districts, metrics);
 
-  // 2. Update happiness for each district
+  // 2. Update happiness (DAMPED toward target)
   for (const d of districts) {
-    d.metrics.happiness = calculateHappiness(d);
+    const targetHappiness = calculateHappiness(d);
+    d.metrics.happiness =
+      d.metrics.happiness * (1 - HAPPINESS_DAMPING) + targetHappiness * HAPPINESS_DAMPING;
   }
 
   // 3. Update job access
@@ -347,14 +324,14 @@ export function tickEconomy(
   // 4. Population growth
   applyPopulationGrowth(districts);
 
-  // 5. Migration
+  // 5. Migration (gentle)
   const moves = simulateMigration(districts);
 
   // 6. Update city metrics
   updateCityMetrics(districts, metrics);
 
-  // 7. Budget
-  events.push(...updateBudget(budget, districts, activeEffects));
+  // 7. Budget (with transit cost passed in)
+  events.push(...updateBudget(budget, districts, transitCost));
 
   return { moves, events };
 }

@@ -14,6 +14,10 @@ import {
   createBusRoutePolicy,
   createRailLinePolicy,
   createReduceParkingPolicy,
+  createBusLanePolicy,
+  createParkingEnforcementPolicy,
+  createIntersectionFixPolicy,
+  createPublicServicesPolicy,
 } from "./policy/policies.js";
 
 function printMetrics(engine: SimulationEngine, label: string) {
@@ -64,49 +68,48 @@ console.log("Challenge: Sprawling IT city, brutal traffic, weak metro");
 const blr = new SimulationEngine(createBengaluru(), GameMode.Political);
 printMetrics(blr, "Bengaluru - Initial State");
 
-// Turn 1: Advance to see baseline
-console.log("\n--- Turn 1: Baseline tick ---");
+// Turn 1: Advance to see baseline — metrics should NOT snap wildly
+console.log("\n--- Turn 1: Baseline tick (should change GRADUALLY) ---");
 let result = blr.tick();
 printEvents(result);
 printMetrics(blr, "After baseline tick");
 
-// Turn 2: Propose bus route to Whitefield
-console.log("\n--- Turn 2: Propose bus route Majestic → Whitefield → Sarjapur ---");
-const busRoute = createBusRoutePolicy(
-  ["blr_majestic", "blr_whitefield", "blr_sarjapur"],
-  "IT Corridor Express"
-);
-let voteResult = blr.proposePolicy(busRoute);
+// Turn 2: Quick win — fix intersections (cheap, easy pass)
+console.log("\n--- Turn 2: Fix Intersections in Whitefield (quick win) ---");
+const intersections = createIntersectionFixPolicy("blr_whitefield", "Whitefield");
+let voteResult = blr.proposePolicy(intersections);
 printVoteResult(voteResult);
 result = blr.tick();
 printEvents(result);
 
-// Turn 3: Try congestion pricing (needs supermajority - might fail!)
-console.log("\n--- Turn 3: Propose congestion pricing for city center ---");
-const congestion = createCongestionPricingPolicy(
-  ["blr_majestic", "blr_indiranagar"],
-  "medium"
-);
-voteResult = blr.proposePolicy(congestion);
-printVoteResult(voteResult);
-result = blr.tick();
-printEvents(result);
-
-// Turn 4: Upzone Whitefield (needs supermajority)
-console.log("\n--- Turn 4: Propose upzoning Whitefield ---");
-const upzone = createUpzonePolicy("blr_whitefield", "Whitefield");
-voteResult = blr.proposePolicy(upzone);
-printVoteResult(voteResult);
-result = blr.tick();
-printEvents(result);
-
-// Turn 5: Reduce parking minimums
-console.log("\n--- Turn 5: Reduce parking minimums in Majestic ---");
-const parking = createReduceParkingPolicy("blr_majestic", "Majestic");
+// Turn 3: Quick win — parking enforcement (generates revenue!)
+console.log("\n--- Turn 3: Parking Enforcement (generates revenue) ---");
+const parking = createParkingEnforcementPolicy(["blr_majestic", "blr_whitefield", "blr_ecity"]);
 voteResult = blr.proposePolicy(parking);
 printVoteResult(voteResult);
 result = blr.tick();
 printEvents(result);
+
+// Turn 4: Bus lanes (cheap, easy)
+console.log("\n--- Turn 4: Bus Lanes on IT corridor ---");
+const busLanes = createBusLanePolicy(
+  ["blr_majestic", "blr_whitefield", "blr_sarjapur"],
+  "IT Corridor"
+);
+voteResult = blr.proposePolicy(busLanes);
+printVoteResult(voteResult);
+result = blr.tick();
+printEvents(result);
+
+// Turn 5: Improve services (universally popular)
+console.log("\n--- Turn 5: Improve Services in E-City ---");
+const services = createPublicServicesPolicy("blr_ecity", "Electronic City");
+voteResult = blr.proposePolicy(services);
+printVoteResult(voteResult);
+result = blr.tick();
+printEvents(result);
+
+printMetrics(blr, "After 5 turns with quick wins");
 
 // Run a few more turns to see effects cascade
 console.log("\n--- Running 5 more turns... ---");
