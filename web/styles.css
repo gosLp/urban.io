@@ -38,14 +38,94 @@ body {
   height: 100vh;
 }
 
-canvas {
-  display: block;
-  width: 100vw;
-  height: 100vh;
+#map-container {
   position: fixed;
   top: 0;
   left: 0;
+  width: 100vw;
+  height: 100vh;
   z-index: 0;
+}
+
+/* ---- Leaflet overrides ---- */
+.leaflet-control-attribution {
+  font-size: 9px;
+  background: rgba(10, 14, 26, 0.7) !important;
+  color: var(--text-dim) !important;
+}
+.leaflet-control-attribution a {
+  color: var(--text-dim) !important;
+}
+.leaflet-control-zoom {
+  border: 1px solid var(--border) !important;
+  border-radius: 8px !important;
+  overflow: hidden;
+}
+.leaflet-control-zoom a {
+  background: var(--surface) !important;
+  color: var(--text) !important;
+  border-bottom-color: var(--border) !important;
+  width: 28px !important;
+  height: 28px !important;
+  line-height: 28px !important;
+  font-size: 16px !important;
+}
+.leaflet-control-zoom a:hover {
+  background: var(--surface-hover) !important;
+}
+/* Move zoom controls so they clear the top bar */
+.leaflet-top.leaflet-right {
+  top: 70px;
+  right: 16px;
+}
+.leaflet-top.leaflet-left {
+  top: 70px;
+}
+
+/* ---- District labels (DivIcon) ---- */
+.district-label {
+  background: transparent !important;
+  border: none !important;
+  pointer-events: none;
+}
+.district-label-inner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  background: rgba(5, 8, 20, 0.72);
+  border: 1px solid color-mix(in srgb, var(--dcolor, #4fc3f7) 40%, transparent);
+  border-radius: 6px;
+  padding: 3px 8px;
+  backdrop-filter: blur(4px);
+  white-space: nowrap;
+  transition: background 0.15s;
+}
+.district-label-inner.selected {
+  background: rgba(10, 14, 30, 0.9);
+  border-color: var(--dcolor, #4fc3f7);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--dcolor, #4fc3f7) 30%, transparent);
+}
+.dlabel-name {
+  font-family: var(--font);
+  font-weight: 600;
+  font-size: 11px;
+  color: #e8eef8;
+  letter-spacing: 0.2px;
+}
+.dlabel-pop {
+  font-family: var(--mono);
+  font-size: 10px;
+  opacity: 0.9;
+}
+.dlabel-metro {
+  font-family: var(--mono);
+  font-size: 9px;
+  font-weight: 700;
+  color: #4fc3f7;
+  position: absolute;
+  top: 2px;
+  right: 4px;
 }
 
 /* ---- Top Bar ---- */
