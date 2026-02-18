@@ -339,6 +339,37 @@ export class MapRenderer {
     }
   }
 
+  private _buildSkylineSVG(d: District, color: string): string {
+    const ratio = d.maxDensity > 0 ? Math.min(1, d.currentDensity / d.maxDensity) : 0;
+    // 5 buildings with staggered max heights (in a 62×21 viewBox, ground at y=20)
+    const maxHeights = [10, 16, 20, 14, 8];
+    const xPositions = [1,  13, 25, 39, 51];
+    const widths     = [10, 10, 12, 10, 10];
+    const r = parseInt(color.slice(1, 3), 16);
+    const g = parseInt(color.slice(3, 5), 16);
+    const b = parseInt(color.slice(5, 7), 16);
+    const fill   = `rgba(${r},${g},${b},0.75)`;
+    const shadow = `rgba(${Math.round(r * 0.45)},${Math.round(g * 0.45)},${Math.round(b * 0.45)},0.85)`;
+    const GROUND = 20;
+    const rects = maxHeights.map((maxH, i) => {
+      const h = Math.max(2, Math.round(maxH * ratio));
+      const y = GROUND - h;
+      const x = xPositions[i];
+      const w = widths[i];
+      return (
+        `<rect x="${x}" y="${y}" width="${w - 2}" height="${h}" fill="${fill}"/>` +
+        `<rect x="${x + w - 2}" y="${y}" width="2" height="${h}" fill="${shadow}"/>`
+      );
+    });
+    return (
+      `<svg xmlns="http://www.w3.org/2000/svg" width="62" height="21" viewBox="0 0 62 21"` +
+      ` style="display:block;margin:0 auto 2px">` +
+      rects.join("") +
+      `<line x1="0" y1="20" x2="62" y2="20" stroke="${fill}" stroke-width="1" opacity="0.5"/>` +
+      `</svg>`
+    );
+  }
+
   private _buildLabelIcon(d: District, color: string): L.DivIcon {
     const shortName = d.name.split("(")[0].split("/")[0].trim();
     const popStr =
@@ -352,15 +383,18 @@ export class MapRenderer {
       ? `<span class="dlabel-metro" style="color:${TRANSIT_RAIL_COLOR}">M</span>`
       : "";
 
+    const skyline = this._buildSkylineSVG(d, color);
+
     return L.divIcon({
       className: "district-label",
       html: `<div class="district-label-inner${isSel ? " selected" : ""}" style="--dcolor:${color}">
         ${metroIcon}
+        ${skyline}
         <span class="dlabel-name">${shortName}</span>
         <span class="dlabel-pop" style="color:${hapColor}">${popStr}</span>
       </div>`,
-      iconSize: [120, 36],
-      iconAnchor: [60, 18],
+      iconSize: [120, 56],
+      iconAnchor: [60, 28],
     });
   }
 

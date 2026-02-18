@@ -229,36 +229,61 @@ body {
 
 .goal-row {
   display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 11px;
-  padding: 3px 0;
+  flex-direction: column;
+  gap: 4px;
+  padding: 5px 0;
+  border-bottom: 1px solid rgba(80, 120, 200, 0.08);
 }
 
-.goal-check {
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  border: 2px solid var(--border);
+.goal-row:last-child {
+  border-bottom: none;
+}
+
+.goal-header {
   display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 9px;
-  flex-shrink: 0;
-}
-
-.goal-check.met {
-  border-color: var(--green);
-  background: rgba(102, 187, 106, 0.2);
-  color: var(--green);
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 4px;
 }
 
 .goal-label {
+  font-size: 11px;
   color: var(--text-dim);
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .goal-label.met {
   color: var(--green);
+}
+
+.goal-values {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.goal-bar-track {
+  height: 4px;
+  background: rgba(80, 120, 200, 0.15);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.goal-bar-fill {
+  height: 100%;
+  border-radius: 2px;
+  transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+  min-width: 2px;
+}
+
+.goal-row.met .goal-bar-fill {
+  box-shadow: 0 0 6px rgba(102, 187, 106, 0.35);
 }
 
 /* ---- District Panel (Right) ---- */
@@ -563,6 +588,106 @@ body {
 @keyframes toast-out {
   from { opacity: 1; }
   to { opacity: 0; transform: translateY(-10px); }
+}
+
+/* ---- Delta Indicators ---- */
+.metric-delta {
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: -0.2px;
+  animation: delta-pop 0.35s ease;
+}
+.delta-good { color: var(--green); }
+.delta-bad  { color: var(--red); }
+
+@keyframes delta-pop {
+  from { opacity: 0; transform: translateY(-3px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ---- City Health Score ---- */
+.health-score-block {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.health-grade {
+  font-family: var(--mono);
+  font-size: 36px;
+  font-weight: 700;
+  line-height: 1;
+  min-width: 30px;
+  text-align: center;
+}
+
+.grade-a { color: var(--green); text-shadow: 0 0 14px rgba(102, 187, 106, 0.45); }
+.grade-b { color: #a5d6a7; }
+.grade-c { color: var(--yellow); }
+.grade-d { color: var(--orange); }
+.grade-f { color: var(--red); text-shadow: 0 0 14px rgba(239, 83, 80, 0.45); }
+
+.health-label-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.health-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--text-dim);
+}
+
+.health-score-num {
+  font-family: var(--mono);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.hud-divider {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 0 0 12px;
+}
+
+/* ---- Turn Summary Notification ---- */
+.turn-summary {
+  background: rgba(10, 14, 30, 0.92);
+  border: 1px solid rgba(79, 195, 247, 0.28);
+  border-radius: 10px;
+  padding: 8px 20px;
+  font-size: 12px;
+  backdrop-filter: blur(8px);
+  animation: toast-in 0.3s ease;
+  max-width: 500px;
+  text-align: center;
+  color: var(--text);
+  line-height: 1.5;
+}
+
+.turn-summary.toast-out {
+  animation: toast-out 0.4s ease forwards;
+}
+
+.summary-turn {
+  font-family: var(--mono);
+  font-weight: 600;
+  color: var(--accent);
+  margin-right: 4px;
+}
+
+.summary-good { color: var(--green); font-weight: 500; }
+.summary-bad  { color: var(--red);   font-weight: 500; }
+.summary-sep  { color: var(--text-dim); }
+
+/* ---- District label skyline ---- */
+.district-label-inner {
+  min-width: 70px;
 }
 
 /* ---- Scrollbar ---- */
