@@ -15,11 +15,28 @@ import { showVoteResult, showEvents } from "./ui/VoteDisplay.js";
 
 // --- Initialize ---
 const engine = new SimulationEngine(createBengaluru(), GameMode.Political);
-const canvas = document.getElementById("game-canvas") as HTMLCanvasElement;
-const renderer = new MapRenderer(canvas);
+const mapContainer = document.getElementById("map-container") as HTMLDivElement;
 
 let selectedDistrict: District | null = null;
-let isProcessing = false; // prevent double-clicks during vote animations
+let isProcessing = false;
+
+// Renderer — receives district-click callbacks instead of canvas hit-testing
+const renderer = new MapRenderer(mapContainer, {
+  onDistrictClick: (district: District) => {
+    // Always look up the freshest copy from engine state
+    const fresh = engine.getState().city.districts.find((d) => d.id === district.id);
+    if (!fresh) return;
+
+    selectedDistrict = fresh as District;
+    renderer.state.selectedDistrict = fresh.id;
+
+    const rep = engine.getState().city.representatives.find(
+      (r) => r.districtId === fresh.id
+    );
+    updateDistrictPanel(fresh as District, rep);
+    refreshPolicies();
+  },
+});
 
 // --- Initial UI update ---
 refreshUI();
@@ -38,31 +55,6 @@ function frame(now: number) {
 
 requestAnimationFrame(frame);
 
-// --- Mouse Interaction ---
-canvas.addEventListener("mousemove", (e) => {
-  const d = renderer.hitTest(e.clientX, e.clientY, engine.getState().city.districts as District[]);
-  renderer.state.hoveredDistrict = d?.id ?? null;
-  canvas.style.cursor = d ? "pointer" : "default";
-});
-
-canvas.addEventListener("click", (e) => {
-  const d = renderer.hitTest(e.clientX, e.clientY, engine.getState().city.districts as District[]);
-
-  if (d) {
-    selectedDistrict = d;
-    renderer.state.selectedDistrict = d.id;
-
-    const rep = engine.getState().city.representatives.find((r) => r.districtId === d.id);
-    updateDistrictPanel(d, rep);
-    refreshPolicies();
-  } else {
-    selectedDistrict = null;
-    renderer.state.selectedDistrict = null;
-    updateDistrictPanel(null, undefined);
-    refreshPolicies();
-  }
-});
-
 // Close district panel
 document.getElementById("district-close")!.addEventListener("click", () => {
   selectedDistrict = null;
@@ -80,10 +72,12 @@ document.getElementById("btn-next-turn")!.addEventListener("click", async () => 
   refreshUI();
   refreshPolicies();
 
-  // Update selected district panel if one is selected
+  // Refresh selected district panel
   if (selectedDistrict) {
     const updated = engine.getState().city.districts.find((d) => d.id === selectedDistrict!.id);
-    const rep = engine.getState().city.representatives.find((r) => r.districtId === selectedDistrict!.id);
+    const rep = engine.getState().city.representatives.find(
+      (r) => r.districtId === selectedDistrict!.id
+    );
     if (updated) {
       selectedDistrict = updated as District;
       updateDistrictPanel(updated as District, rep);
@@ -92,11 +86,13 @@ document.getElementById("btn-next-turn")!.addEventListener("click", async () => 
 
   if (engine.isGameOver()) {
     (document.getElementById("btn-next-turn") as HTMLButtonElement).disabled = true;
-    showEvents([{
-      type: "crisis",
-      message: engine.getState().gameOverReason || "Game Over",
-      severity: "critical",
-    }]);
+    showEvents([
+      {
+        type: "crisis",
+        message: engine.getState().gameOverReason || "Game Over",
+        severity: "critical",
+      },
+    ]);
   }
 });
 
@@ -108,11 +104,7 @@ async function handlePolicySelect(policy: PolicyProposal) {
   const result = engine.proposePolicy(policy);
 
   if (result) {
-    await showVoteResult(
-      result,
-      policy.name,
-      engine.getState().city.representatives as any[]
-    );
+    await showVoteResult(result, policy.name, engine.getState().city.representatives as any[]);
   }
 
   refreshUI();
@@ -126,10 +118,7 @@ function refreshUI() {
 }
 
 function refreshPolicies() {
-  const policies = getAvailablePolicies(
-    engine.getState() as any,
-    selectedDistrict?.id ?? null
-  );
+  const policies = getAvailablePolicies(engine.getState() as any, selectedDistrict?.id ?? null);
   renderPolicyButtons(policies, handlePolicySelect);
 }
 

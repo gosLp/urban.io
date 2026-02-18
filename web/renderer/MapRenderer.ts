@@ -1,8 +1,12 @@
 // ============================================
-// Canvas 2D Map Renderer — Real Bengaluru Geography
-// Draws: city boundary, district zones, major roads,
-//        lakes, transit lines, congestion overlays
+// Leaflet Map Renderer — Real Bengaluru Tiles
+// Uses CartoDB Dark Matter tiles as base map.
+// Game overlays (districts, roads, transit)
+// rendered as Leaflet vector layers on top.
 // ============================================
+
+import L from "leaflet";
+import "leaflet/dist/leaflet.css";
 
 import type { District, TransitLine, RoadNetwork, GameState } from "@engine/types.js";
 import { TransitType } from "@engine/types.js";
@@ -10,16 +14,10 @@ import {
   BENGALURU_GEODATA,
   DISTRICT_CENTERS,
   DISTRICT_BOUNDARIES,
-  projectToScreen,
   type Coord,
-  type BengaluruGeoData,
 } from "@engine/data/bengaluru/geodata.js";
 import {
   DISTRICT_COLORS,
-  glowColor,
-  darken,
-  lighten,
-  congestionColor,
   TRANSIT_RAIL_COLOR,
   TRANSIT_BUS_COLOR,
 } from "./colors.js";
@@ -29,16 +27,25 @@ export interface RendererState {
   selectedDistrict: string | null;
   hoveredDistrict: string | null;
   time: number;
-  camera: { x: number; y: number; zoom: number };
+  camera: { x: number; y: number; zoom: number }; // kept for API compat
+}
+
+export interface MapRendererCallbacks {
+  onDistrictClick?: (district: District) => void;
+  onDistrictDeselect?: () => void;
+}
+
+/** Convert [lng, lat] geodata coord to Leaflet [lat, lng] */
+function ll(coord: Coord): L.LatLngExpression {
+  return [coord[1], coord[0]];
+}
+
+function llAll(coords: Coord[]): L.LatLngExpression[] {
+  return coords.map(ll);
 }
 
 export class MapRenderer {
-  private canvas: HTMLCanvasElement;
-  private ctx: CanvasRenderingContext2D;
-  private width = 0;
-  private height = 0;
-  private dpr = 1;
-  private padding = 40;
+  private map: L.Map;
   public state: RendererState = {
     selectedDistrict: null,
     hoveredDistrict: null,
@@ -46,397 +53,367 @@ export class MapRenderer {
     camera: { x: 0, y: 0, zoom: 1 },
   };
 
-  constructor(canvas: HTMLCanvasElement) {
-    this.canvas = canvas;
-    this.ctx = canvas.getContext("2d")!;
-    this.resize();
-    window.addEventListener("resize", () => this.resize());
+  // Game layers
+  private districtLayers = new Map<string, L.Polygon>();
+  private districtColors = new Map<string, string>();
+  private gameRoadLayers = new Map<string, L.Polyline>();
+  private transitLayers: L.Layer[] = [];
+  private labelMarkers = new Map<string, L.Marker>();
+
+  // State tracking
+  private currentDistricts: District[] = [];
+  private callbacks: MapRendererCallbacks;
+  private initialized = false;
+  private lastUpdateTime = 0;
+  private lastTransitHash = "";
+
+  constructor(container: HTMLElement, callbacks: MapRendererCallbacks = {}) {
+    this.callbacks = callbacks;
+
+    // Create Leaflet map
+    this.map = L.map(container, {
+      zoomControl: true,
+      attributionControl: true,
+      preferCanvas: false, // use SVG renderer for crisp vector overlays
+    });
+
+    // CartoDB Dark Matter — free, no API key, dark aesthetic
+    L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
+      attribution:
+        '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/">CARTO</a>',
+      subdomains: "abcd",
+      maxZoom: 19,
+    }).addTo(this.map);
+
+    // Fit to Bengaluru bounds
+    const [minLng, minLat, maxLng, maxLat] = BENGALURU_GEODATA.bbox;
+    this.map.fitBounds(
+      [
+        [minLat, minLng],
+        [maxLat, maxLng],
+      ],
+      { padding: [20, 20] }
+    );
+
+    // Static geographic layers (painted once)
+    this._addCityBoundary();
+    this._addWaterFeatures();
+    this._addGeoRoads();
   }
 
-  private resize() {
-    this.dpr = window.devicePixelRatio || 1;
-    this.width = window.innerWidth;
-    this.height = window.innerHeight;
-    this.canvas.width = this.width * this.dpr;
-    this.canvas.height = this.height * this.dpr;
-    this.ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+  // ─── Static layers ────────────────────────────────────────────
+
+  private _addCityBoundary() {
+    L.polygon(llAll(BENGALURU_GEODATA.boundary), {
+      fillColor: "#141e32",
+      fillOpacity: 0.12,
+      color: "rgba(100,140,180,0.22)",
+      weight: 1.5,
+      interactive: false,
+    }).addTo(this.map);
   }
 
-  /** Project geo coord to screen pixel */
-  private project(coord: Coord): [number, number] {
-    const [sx, sy] = projectToScreen(coord, this.width, this.height, this.padding);
-    const cam = this.state.camera;
-    return [sx * cam.zoom + cam.x, sy * cam.zoom + cam.y];
-  }
-
-  /** Hit-test: which district is under screen coords? */
-  hitTest(sx: number, sy: number, districts: District[]): District | null {
-    // Check point-in-polygon for each district boundary
-    for (const d of districts) {
-      const boundary = DISTRICT_BOUNDARIES[d.id];
-      if (!boundary) continue;
-
-      const screenPoly = boundary.map((c) => this.project(c));
-      if (pointInPolygon(sx, sy, screenPoly)) {
-        return d;
-      }
+  private _addWaterFeatures() {
+    for (const lake of BENGALURU_GEODATA.water) {
+      L.polygon(llAll(lake.coords), {
+        fillColor: "#2196f3",
+        fillOpacity: 0.22,
+        color: "rgba(33,150,243,0.4)",
+        weight: 1,
+        interactive: false,
+      }).addTo(this.map);
     }
-    return null;
   }
 
-  /** Main render frame */
-  render(gameState: GameState, dt: number) {
-    this.state.time += dt;
-    const ctx = this.ctx;
-    const w = this.width;
-    const h = this.height;
-
-    // Clear with dark background
-    ctx.fillStyle = "#0a0e1a";
-    ctx.fillRect(0, 0, w, h);
-
-    const { districts, roadNetwork, transitLines } = gameState.city;
-
-    // 1. City boundary outline (subtle)
-    this.drawBoundary();
-
-    // 2. District fills
-    this.drawDistrictFills(districts);
-
-    // 3. Major roads from geodata
-    this.drawGeoRoads();
-
-    // 4. Game road connections (congestion overlay)
-    this.drawGameRoads(districts, roadNetwork);
-
-    // 5. Water features
-    this.drawWater();
-
-    // 6. Transit lines
-    this.drawTransitLines(districts, transitLines);
-
-    // 7. District labels and indicators
-    this.drawLabels(districts);
-  }
-
-  private drawBoundary() {
-    const ctx = this.ctx;
-    const boundary = BENGALURU_GEODATA.boundary;
-    if (boundary.length < 3) return;
-
-    ctx.beginPath();
-    const [sx, sy] = this.project(boundary[0]);
-    ctx.moveTo(sx, sy);
-    for (let i = 1; i < boundary.length; i++) {
-      const [px, py] = this.project(boundary[i]);
-      ctx.lineTo(px, py);
+  private _addGeoRoads() {
+    for (const road of BENGALURU_GEODATA.roads) {
+      L.polyline(llAll(road), {
+        color: "rgba(90,110,150,0.45)",
+        weight: 1.5,
+        interactive: false,
+      }).addTo(this.map);
     }
-    ctx.closePath();
-
-    // Subtle fill to show city area
-    ctx.fillStyle = "rgba(20, 30, 50, 0.5)";
-    ctx.fill();
-
-    // Boundary stroke
-    ctx.strokeStyle = "rgba(100, 140, 180, 0.25)";
-    ctx.lineWidth = 1.5;
-    ctx.stroke();
   }
 
-  private drawDistrictFills(districts: District[]) {
-    const ctx = this.ctx;
-    const t = this.state.time;
+  // ─── Dynamic layer init (called once on first render) ─────────
 
+  private _initDistricts(districts: District[]) {
     for (const d of districts) {
       const boundary = DISTRICT_BOUNDARIES[d.id];
       if (!boundary || boundary.length < 3) continue;
 
-      const color = DISTRICT_COLORS[d.id] || "#4fc3f7";
-      const isSelected = this.state.selectedDistrict === d.id;
-      const isHovered = this.state.hoveredDistrict === d.id;
+      const color = DISTRICT_COLORS[d.id] ?? "#4fc3f7";
+      this.districtColors.set(d.id, color);
 
-      // Draw district polygon
-      const screenPoints = boundary.map((c) => this.project(c));
-      ctx.beginPath();
-      ctx.moveTo(screenPoints[0][0], screenPoints[0][1]);
-      for (let i = 1; i < screenPoints.length; i++) {
-        ctx.lineTo(screenPoints[i][0], screenPoints[i][1]);
-      }
-      ctx.closePath();
+      const polygon = L.polygon(llAll(boundary), {
+        fillColor: color,
+        fillOpacity: 0.2,
+        color: color,
+        weight: 1,
+        opacity: 0.35,
+        interactive: true,
+      });
 
-      // Fill with district color (semi-transparent)
-      const breathe = Math.sin(t * 0.0015 + d.id.charCodeAt(4) * 0.3) * 0.04;
-      const baseAlpha = 0.2 + breathe;
-      const alpha = isSelected ? 0.45 : isHovered ? 0.35 : baseAlpha;
-      ctx.fillStyle = hexToRgba(color, alpha);
-      ctx.fill();
+      // Click → select district
+      polygon.on("click", () => {
+        this.state.selectedDistrict = d.id;
+        const current = this.currentDistricts.find((x) => x.id === d.id);
+        if (current) this.callbacks.onDistrictClick?.(current);
+      });
 
-      // Border
-      ctx.strokeStyle = hexToRgba(color, isSelected ? 0.8 : isHovered ? 0.6 : 0.3);
-      ctx.lineWidth = isSelected ? 2.5 : isHovered ? 2 : 1;
-      ctx.stroke();
+      // Hover highlight
+      polygon.on("mouseover", () => {
+        this.state.hoveredDistrict = d.id;
+        this.map.getContainer().style.cursor = "pointer";
+      });
+      polygon.on("mouseout", () => {
+        if (this.state.hoveredDistrict === d.id) {
+          this.state.hoveredDistrict = null;
+          this.map.getContainer().style.cursor = "";
+        }
+      });
 
-      // Congestion overlay (red tint for high congestion)
-      const cong = d.metrics.trafficCongestion;
-      if (cong > 0.4) {
-        const congAlpha = (cong - 0.4) * 0.25;
-        ctx.fillStyle = `rgba(239, 83, 80, ${congAlpha})`;
-        ctx.fill();
-      }
+      polygon.addTo(this.map);
+      this.districtLayers.set(d.id, polygon);
 
-      // Glow for selected/hovered
-      if (isSelected || isHovered) {
-        ctx.save();
-        ctx.shadowColor = glowColor(color, 0.5);
-        ctx.shadowBlur = 15;
-        ctx.strokeStyle = hexToRgba(color, 0.6);
-        ctx.lineWidth = 2;
-        ctx.stroke();
-        ctx.restore();
-      }
-
-      // Selection dashed outline
-      if (isSelected) {
-        ctx.setLineDash([6, 4]);
-        ctx.strokeStyle = "#ffffff";
-        ctx.lineWidth = 1.5;
-        ctx.stroke();
-        ctx.setLineDash([]);
+      // Label marker
+      const center = DISTRICT_CENTERS[d.id];
+      if (center) {
+        const marker = L.marker(ll(center), {
+          icon: this._buildLabelIcon(d, color),
+          interactive: false,
+          zIndexOffset: 100,
+        });
+        marker.addTo(this.map);
+        this.labelMarkers.set(d.id, marker);
       }
     }
   }
 
-  private drawGeoRoads() {
-    const ctx = this.ctx;
+  private _initGameRoads(districts: District[]) {
+    const drawn = new Set<string>();
+    for (const d of districts) {
+      for (const adjId of d.adjacentDistricts) {
+        const key = [d.id, adjId].sort().join("--");
+        if (drawn.has(key)) continue;
+        drawn.add(key);
 
-    for (const road of BENGALURU_GEODATA.roads) {
-      if (road.length < 2) continue;
+        const cA = DISTRICT_CENTERS[d.id];
+        const cB = DISTRICT_CENTERS[adjId];
+        if (!cA || !cB) continue;
 
-      ctx.beginPath();
-      const [sx, sy] = this.project(road[0]);
-      ctx.moveTo(sx, sy);
-      for (let i = 1; i < road.length; i++) {
-        const [px, py] = this.project(road[i]);
-        ctx.lineTo(px, py);
+        const line = L.polyline([ll(cA), ll(cB)], {
+          color: "#3c5c8c",
+          weight: 2,
+          opacity: 0.2,
+          interactive: false,
+        }).addTo(this.map);
+
+        this.gameRoadLayers.set(key, line);
       }
-
-      ctx.strokeStyle = "rgba(80, 100, 130, 0.35)";
-      ctx.lineWidth = 1.5;
-      ctx.stroke();
     }
   }
 
-  private drawGameRoads(districts: District[], roadNetwork: RoadNetwork) {
-    const ctx = this.ctx;
+  // ─── Per-frame style updates (throttled to ~10fps) ────────────
+
+  private _updateDistrictStyles(districts: District[]) {
+    const t = this.state.time;
 
     for (const d of districts) {
-      const centerA = DISTRICT_CENTERS[d.id];
-      if (!centerA) continue;
+      const polygon = this.districtLayers.get(d.id);
+      if (!polygon) continue;
 
+      const color = this.districtColors.get(d.id) ?? "#4fc3f7";
+      const isSel = this.state.selectedDistrict === d.id;
+      const isHov = this.state.hoveredDistrict === d.id;
+
+      // Breathing pulse
+      const breathe = Math.sin(t * 0.0015 + d.id.charCodeAt(4) * 0.3) * 0.04;
+      const baseAlpha = 0.22 + breathe;
+
+      const fillOpacity = isSel ? 0.5 : isHov ? 0.4 : baseAlpha;
+      const opacity = isSel ? 0.9 : isHov ? 0.7 : 0.35;
+      const weight = isSel ? 2.5 : isHov ? 2 : 1;
+
+      // Congestion red-tint blended into fill color
+      const cong = d.metrics.trafficCongestion;
+      const fillColor =
+        cong > 0.4 ? blendHex(color, "#ef5350", (cong - 0.4) * 0.55) : color;
+
+      polygon.setStyle({
+        fillColor,
+        fillOpacity,
+        color: isSel ? "#ffffff" : color,
+        weight,
+        opacity,
+        dashArray: isSel ? "6, 4" : undefined,
+      });
+
+      if (isSel || isHov) polygon.bringToFront();
+    }
+  }
+
+  private _updateGameRoadStyles(districts: District[], roadNetwork: RoadNetwork) {
+    const drawn = new Set<string>();
+    for (const d of districts) {
       for (const adjId of d.adjacentDistricts) {
-        if (d.id > adjId) continue; // draw each road once
-        const centerB = DISTRICT_CENTERS[adjId];
-        if (!centerB) continue;
+        const key = [d.id, adjId].sort().join("--");
+        if (drawn.has(key)) continue;
+        drawn.add(key);
 
-        const [x1, y1] = this.project(centerA);
-        const [x2, y2] = this.project(centerB);
+        const line = this.gameRoadLayers.get(key);
+        if (!line) continue;
 
-        const key = roadKey(d.id, adjId);
-        const capacity = roadNetwork.capacities.get(key) ?? 1;
-        const load = roadNetwork.loads.get(key) ?? 0;
-        const congestion = Math.min(load / capacity, 1);
+        const rk = roadKey(d.id, adjId);
+        const cap = roadNetwork.capacities.get(rk) ?? 1;
+        const load = roadNetwork.loads.get(rk) ?? 0;
+        const cong = Math.min(load / cap, 1);
 
-        // Color by congestion intensity
-        const r = Math.round(60 + congestion * 179);
-        const g = Math.round(100 - congestion * 60);
-        const b = Math.round(140 - congestion * 60);
-        const a = 0.15 + congestion * 0.45;
+        const r = Math.round(60 + cong * 179);
+        const g = Math.round(100 - cong * 60);
+        const b = Math.round(140 - cong * 60);
 
-        ctx.strokeStyle = `rgba(${r}, ${g}, ${b}, ${a})`;
-        ctx.lineWidth = 2 + congestion * 4;
-        ctx.setLineDash([]);
-
-        ctx.beginPath();
-        ctx.moveTo(x1, y1);
-        ctx.lineTo(x2, y2);
-        ctx.stroke();
+        line.setStyle({
+          color: `rgb(${r},${g},${b})`,
+          weight: 2 + cong * 4,
+          opacity: 0.15 + cong * 0.45,
+        });
       }
     }
   }
 
-  private drawWater() {
-    const ctx = this.ctx;
-
-    for (const lake of BENGALURU_GEODATA.water) {
-      if (lake.coords.length < 3) continue;
-
-      const screenPoints = lake.coords.map((c) => this.project(c));
-      ctx.beginPath();
-      ctx.moveTo(screenPoints[0][0], screenPoints[0][1]);
-      for (let i = 1; i < screenPoints.length; i++) {
-        ctx.lineTo(screenPoints[i][0], screenPoints[i][1]);
-      }
-      ctx.closePath();
-
-      // Water fill
-      ctx.fillStyle = "rgba(33, 150, 243, 0.2)";
-      ctx.fill();
-      ctx.strokeStyle = "rgba(33, 150, 243, 0.35)";
-      ctx.lineWidth = 1;
-      ctx.stroke();
+  private _updateTransitLines(districts: District[], transitLines: TransitLine[]) {
+    // Remove old transit layers
+    for (const layer of this.transitLayers) {
+      layer.remove();
     }
-  }
+    this.transitLayers = [];
 
-  private drawTransitLines(districts: District[], transitLines: TransitLine[]) {
-    const ctx = this.ctx;
+    for (const tLine of transitLines) {
+      const isRail = tLine.type === TransitType.Rail;
+      const underCon = tLine.constructionTurnsRemaining > 0;
+      const color = isRail ? TRANSIT_RAIL_COLOR : TRANSIT_BUS_COLOR;
 
-    for (const line of transitLines) {
-      const isRail = line.type === TransitType.Rail;
-      const underConstruction = line.constructionTurnsRemaining > 0;
+      const points = tLine.districts
+        .map((id) => DISTRICT_CENTERS[id])
+        .filter((c): c is Coord => !!c)
+        .map((c) => ll(c));
 
-      ctx.strokeStyle = isRail ? TRANSIT_RAIL_COLOR : TRANSIT_BUS_COLOR;
-      ctx.lineWidth = isRail ? 3 : 2;
-      ctx.globalAlpha = underConstruction ? 0.3 : 0.8;
+      if (points.length < 2) continue;
 
-      if (underConstruction) {
-        ctx.setLineDash([8, 6]);
-      } else {
-        ctx.setLineDash(isRail ? [] : [4, 4]);
-      }
-
-      ctx.beginPath();
-      let started = false;
-
-      for (const districtId of line.districts) {
-        const center = DISTRICT_CENTERS[districtId];
-        if (!center) continue;
-        const [x, y] = this.project(center);
-
-        if (!started) {
-          ctx.moveTo(x, y);
-          started = true;
-        } else {
-          ctx.lineTo(x, y);
-        }
-      }
-
-      ctx.stroke();
-      ctx.globalAlpha = 1;
-      ctx.setLineDash([]);
+      const pline = L.polyline(points, {
+        color,
+        weight: isRail ? 3.5 : 2.5,
+        opacity: underCon ? 0.3 : 0.85,
+        dashArray: underCon ? "8,6" : isRail ? undefined : "5,5",
+        interactive: false,
+      }).addTo(this.map);
+      this.transitLayers.push(pline);
 
       // Station dots
-      if (!underConstruction) {
-        for (const districtId of line.districts) {
-          const center = DISTRICT_CENTERS[districtId];
+      if (!underCon) {
+        for (const distId of tLine.districts) {
+          const center = DISTRICT_CENTERS[distId];
           if (!center) continue;
-          const [x, y] = this.project(center);
 
-          ctx.fillStyle = isRail ? TRANSIT_RAIL_COLOR : TRANSIT_BUS_COLOR;
-          ctx.beginPath();
-          ctx.arc(x, y, isRail ? 4 : 3, 0, Math.PI * 2);
-          ctx.fill();
-
-          ctx.fillStyle = "#0a0e1a";
-          ctx.beginPath();
-          ctx.arc(x, y, isRail ? 2 : 1.5, 0, Math.PI * 2);
-          ctx.fill();
+          const outer = L.circleMarker(ll(center), {
+            radius: isRail ? 5 : 4,
+            fillColor: color,
+            fillOpacity: 1,
+            color: "#0a0e1a",
+            weight: 1.5,
+            interactive: false,
+          }).addTo(this.map);
+          this.transitLayers.push(outer);
         }
       }
     }
   }
 
-  private drawLabels(districts: District[]) {
-    const ctx = this.ctx;
-
+  private _updateLabels(districts: District[]) {
     for (const d of districts) {
-      const center = DISTRICT_CENTERS[d.id];
-      if (!center) continue;
-      const [cx, cy] = this.project(center);
-
-      const isSelected = this.state.selectedDistrict === d.id;
-      const isHovered = this.state.hoveredDistrict === d.id;
-
-      // Background pill for readability
-      const shortName = d.name.split("(")[0].split("/")[0].trim();
-      const fontSize = Math.max(10, Math.min(14, this.width * 0.012));
-
-      ctx.font = `600 ${fontSize}px Inter, system-ui, sans-serif`;
-      const textWidth = ctx.measureText(shortName).width;
-
-      if (isSelected || isHovered) {
-        ctx.fillStyle = "rgba(0, 0, 0, 0.6)";
-        const pillW = textWidth + 12;
-        const pillH = fontSize + 20;
-        roundRect(ctx, cx - pillW / 2, cy - pillH / 2 - 2, pillW, pillH, 6);
-        ctx.fill();
-      }
-
-      // District name
-      ctx.fillStyle = isSelected ? "#ffffff" : "rgba(255, 255, 255, 0.85)";
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      ctx.fillText(shortName, cx, cy - 4);
-
-      // Population below
-      ctx.font = `500 ${Math.max(8, fontSize * 0.75)}px 'JetBrains Mono', monospace`;
-      ctx.fillStyle = "rgba(255, 255, 255, 0.5)";
-      const popStr = d.population >= 1000000
-        ? `${(d.population / 1000000).toFixed(1)}M`
-        : `${(d.population / 1000).toFixed(0)}k`;
-      ctx.fillText(popStr, cx, cy + fontSize * 0.6);
-
-      // Happiness indicator dot
-      const hap = d.metrics.happiness;
-      const hapColor = hap > 0.55 ? "#66bb6a" : hap > 0.35 ? "#ffca28" : "#ef5350";
-      ctx.fillStyle = hapColor;
-      ctx.beginPath();
-      ctx.arc(cx + textWidth / 2 + 8, cy - 4, 3, 0, Math.PI * 2);
-      ctx.fill();
-
-      // Transit station indicator
-      if (d.hasTransitStation) {
-        ctx.fillStyle = "rgba(255, 255, 255, 0.7)";
-        ctx.font = `bold ${Math.max(8, fontSize * 0.7)}px sans-serif`;
-        ctx.fillText("M", cx - textWidth / 2 - 10, cy - 4);
-      }
+      const marker = this.labelMarkers.get(d.id);
+      if (!marker) continue;
+      const color = this.districtColors.get(d.id) ?? "#4fc3f7";
+      marker.setIcon(this._buildLabelIcon(d, color));
     }
   }
-}
 
-// --- Utilities ---
+  private _buildLabelIcon(d: District, color: string): L.DivIcon {
+    const shortName = d.name.split("(")[0].split("/")[0].trim();
+    const popStr =
+      d.population >= 1_000_000
+        ? `${(d.population / 1_000_000).toFixed(1)}M`
+        : `${(d.population / 1000).toFixed(0)}k`;
+    const hap = d.metrics.happiness;
+    const hapColor = hap > 0.55 ? "#66bb6a" : hap > 0.35 ? "#ffca28" : "#ef5350";
+    const isSel = this.state.selectedDistrict === d.id;
+    const metroIcon = d.hasTransitStation
+      ? `<span class="dlabel-metro" style="color:${TRANSIT_RAIL_COLOR}">M</span>`
+      : "";
 
-function hexToRgba(hex: string, alpha: number): string {
-  const r = parseInt(hex.slice(1, 3), 16);
-  const g = parseInt(hex.slice(3, 5), 16);
-  const b = parseInt(hex.slice(5, 7), 16);
-  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
-}
-
-function pointInPolygon(x: number, y: number, polygon: [number, number][]): boolean {
-  let inside = false;
-  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
-    const xi = polygon[i][0], yi = polygon[i][1];
-    const xj = polygon[j][0], yj = polygon[j][1];
-    const intersect = ((yi > y) !== (yj > y)) &&
-      (x < (xj - xi) * (y - yi) / (yj - yi) + xi);
-    if (intersect) inside = !inside;
+    return L.divIcon({
+      className: "district-label",
+      html: `<div class="district-label-inner${isSel ? " selected" : ""}" style="--dcolor:${color}">
+        ${metroIcon}
+        <span class="dlabel-name">${shortName}</span>
+        <span class="dlabel-pop" style="color:${hapColor}">${popStr}</span>
+      </div>`,
+      iconSize: [120, 36],
+      iconAnchor: [60, 18],
+    });
   }
-  return inside;
+
+  // ─── Public API ───────────────────────────────────────────────
+
+  /** Main render — call every animation frame */
+  render(gameState: GameState, dt: number) {
+    this.state.time += dt;
+    this.currentDistricts = gameState.city.districts as District[];
+
+    // One-time initialization
+    if (!this.initialized && this.currentDistricts.length > 0) {
+      this._initDistricts(this.currentDistricts);
+      this._initGameRoads(this.currentDistricts);
+      this.initialized = true;
+    }
+
+    // Throttle style updates to ~10fps (every 100ms)
+    const now = this.state.time;
+    if (now - this.lastUpdateTime < 100) return;
+    this.lastUpdateTime = now;
+
+    const { districts, roadNetwork, transitLines } = gameState.city;
+
+    this._updateDistrictStyles(districts as District[]);
+    this._updateGameRoadStyles(districts as District[], roadNetwork);
+
+    const hash = transitLines
+      .map((l) => `${l.id}:${l.constructionTurnsRemaining}`)
+      .join("|");
+    if (hash !== this.lastTransitHash) {
+      this._updateTransitLines(districts as District[], transitLines);
+      this.lastTransitHash = hash;
+    }
+
+    this._updateLabels(districts as District[]);
+  }
+
+  /** No-op — kept for main.ts compatibility. Leaflet handles events. */
+  hitTest(_x: number, _y: number, _districts: District[]): District | null {
+    return null;
+  }
 }
 
-function roundRect(
-  ctx: CanvasRenderingContext2D,
-  x: number, y: number, w: number, h: number, r: number
-) {
-  ctx.beginPath();
-  ctx.moveTo(x + r, y);
-  ctx.lineTo(x + w - r, y);
-  ctx.quadraticCurveTo(x + w, y, x + w, y + r);
-  ctx.lineTo(x + w, y + h - r);
-  ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
-  ctx.lineTo(x + r, y + h);
-  ctx.quadraticCurveTo(x, y + h, x, y + h - r);
-  ctx.lineTo(x, y + r);
-  ctx.quadraticCurveTo(x, y, x + r, y);
-  ctx.closePath();
+// ─── Utilities ────────────────────────────────────────────────
+
+/** Linear interpolation between two hex colors */
+function blendHex(hex1: string, hex2: string, t: number): string {
+  const r1 = parseInt(hex1.slice(1, 3), 16);
+  const g1 = parseInt(hex1.slice(3, 5), 16);
+  const b1 = parseInt(hex1.slice(5, 7), 16);
+  const r2 = parseInt(hex2.slice(1, 3), 16);
+  const g2 = parseInt(hex2.slice(3, 5), 16);
+  const b2 = parseInt(hex2.slice(5, 7), 16);
+  return `rgb(${Math.round(r1 + (r2 - r1) * t)},${Math.round(g1 + (g2 - g1) * t)},${Math.round(b1 + (b2 - b1) * t)})`;
 }

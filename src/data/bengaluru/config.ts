@@ -251,8 +251,8 @@ export function createBengaluru(): CityConfig {
     transitLines,
     roadNetwork,
     budget: {
-      balance: 15000,
-      incomePerTurn: 2000,
+      balance: 50000,
+      incomePerTurn: 2500,
       expensesPerTurn: 650,
       taxRate: 0.15,
       transitSubsidy: 0.3,
@@ -270,7 +270,7 @@ export function createBengaluru(): CityConfig {
       jobsTotal: 450000,
       economicOutput: 85000,
     },
-    electionInterval: 8,
+    electionInterval: 20,
     scenarioGoals: [
       { metric: "averageCommute", target: 35, comparison: "below", label: "Average commute under 35 minutes" },
       { metric: "overallHappiness", target: 0.6, comparison: "above", label: "Overall happiness above 60%" },
