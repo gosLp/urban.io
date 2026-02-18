@@ -11,7 +11,7 @@ import type { PolicyProposal, District } from "@engine/types.js";
 import { MapRenderer } from "./renderer/MapRenderer.js";
 import { updateCityHUD, updateDistrictPanel } from "./ui/HUD.js";
 import { getAvailablePolicies, renderPolicyButtons } from "./ui/PolicyPanel.js";
-import { showVoteResult, showEvents } from "./ui/VoteDisplay.js";
+import { showVoteResult, showEvents, showTurnSummary } from "./ui/VoteDisplay.js";
 
 // --- Initialize ---
 const engine = new SimulationEngine(createBengaluru(), GameMode.Political);
@@ -68,6 +68,7 @@ document.getElementById("btn-next-turn")!.addEventListener("click", async () => 
   if (isProcessing || engine.isGameOver()) return;
 
   const result = engine.tick();
+  showTurnSummary(result.turn, result.metricsBefor, result.metricsAfter);
   showEvents(result.events);
   refreshUI();
   refreshPolicies();

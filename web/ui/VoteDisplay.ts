@@ -2,7 +2,7 @@
 // Vote Result Display & Event Feed
 // ============================================
 
-import type { VoteResult, Representative, TurnResult, GameEvent } from "@engine/types.js";
+import type { VoteResult, Representative, CityMetrics, GameEvent } from "@engine/types.js";
 
 /**
  * Show the vote result overlay.
@@ -63,6 +63,49 @@ export function showVoteResult(
     };
     dismissBtn.addEventListener("click", dismiss);
   });
+}
+
+/**
+ * Show a single consolidated summary of what changed this turn.
+ * Uses metricsBefor/metricsAfter from TurnResult.
+ */
+export function showTurnSummary(
+  turn: number,
+  before: CityMetrics,
+  after: CityMetrics
+): void {
+  type Entry = { label: string; delta: number; fmt: (v: number) => string; goodDir: "up" | "down"; threshold: number };
+  const checks: Entry[] = [
+    { label: "Commute",    delta: after.averageCommute - before.averageCommute,                        fmt: (v) => `${v.toFixed(1)}min`, goodDir: "down", threshold: 0.5 },
+    { label: "Happiness",  delta: (after.overallHappiness - before.overallHappiness) * 100,            fmt: (v) => `${v.toFixed(1)}%`,   goodDir: "up",   threshold: 0.5 },
+    { label: "Congestion", delta: (after.congestionIndex - before.congestionIndex) * 100,              fmt: (v) => `${v.toFixed(1)}%`,   goodDir: "down", threshold: 0.5 },
+    { label: "Rent",       delta: after.averageRent - before.averageRent,                              fmt: (v) => `$${v.toFixed(0)}`,   goodDir: "down", threshold: 10  },
+  ];
+
+  const parts: string[] = [];
+  for (const c of checks) {
+    if (Math.abs(c.delta) <= c.threshold) continue;
+    const isGood = c.goodDir === "up" ? c.delta > 0 : c.delta < 0;
+    const arrow = c.delta > 0 ? "↑" : "↓";
+    const cls   = isGood ? "summary-good" : "summary-bad";
+    parts.push(`<span class="${cls}">${c.label} ${arrow}${c.fmt(Math.abs(c.delta))}</span>`);
+  }
+
+  if (parts.length === 0) return;
+
+  const feed = document.getElementById("event-feed")!;
+  const el = document.createElement("div");
+  el.className = "turn-summary";
+  // Content is entirely internally generated — no user input
+  el.innerHTML =
+    `<span class="summary-turn">Turn ${turn}:</span> ` +
+    parts.join(`<span class="summary-sep"> · </span>`);
+  feed.appendChild(el);
+
+  setTimeout(() => {
+    el.classList.add("toast-out");
+    setTimeout(() => el.parentNode?.removeChild(el), 400);
+  }, 4000);
 }
 
 /**
